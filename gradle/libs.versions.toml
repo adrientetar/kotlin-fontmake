@@ -1,0 +1,11 @@
+[versions]
+kotlin = "2.2.21"
+truth = "1.4.4"
+mavenPublish = "0.34.0"
+
+[libraries]
+truth = { module = "com.google.truth:truth", version.ref = "truth" }
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "mavenPublish" }

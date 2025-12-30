@@ -1,0 +1,24 @@
+# Ignore Gradle project-specific cache directory
+.gradle
+
+# Ignore Gradle build output directory
+build
+
+# IntelliJ IDEA
+.idea
+*.iml
+*.ipr
+*.iws
+
+# macOS
+.DS_Store
+
+# Native binaries (built separately)
+*.dylib
+*.so
+*.dll
+
+# Nuitka build artifacts
+*.build/
+*.dist/
+*.onefile-build/
