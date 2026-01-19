@@ -43,6 +43,14 @@ enum class OutputFormat(internal val flag: String?, internal val baseFormat: Out
     WOFF2_OTF(null, OTF, CompressionFormat.WOFF2),
     /** WOFF2 compressed from TTF */
     WOFF2_TTF(null, TTF, CompressionFormat.WOFF2),
+    /** WOFF compressed from variable TTF */
+    WOFF_VARIABLE(null, VARIABLE, CompressionFormat.WOFF),
+    /** WOFF2 compressed from variable TTF */
+    WOFF2_VARIABLE(null, VARIABLE, CompressionFormat.WOFF2),
+    /** WOFF compressed from variable CFF2 */
+    WOFF_VARIABLE_CFF2(null, VARIABLE_CFF2, CompressionFormat.WOFF),
+    /** WOFF2 compressed from variable CFF2 */
+    WOFF2_VARIABLE_CFF2(null, VARIABLE_CFF2, CompressionFormat.WOFF2),
     ;
 
     /** Whether this is a native fontmake format (vs a derived web format) */
@@ -63,21 +71,44 @@ enum class CompressionFormat(val extension: String) {
 }
 
 /**
- * Options for font compilation.
+ * Outline/build options applied to a fontmake invocation.
+ *
+ * These options are part of the "compatibility key" for reusing builds:
+ * two outputs can share the same underlying build only if their effective
+ * options are identical.
+ */
+data class OutlineOptions(
+    /** Remove overlaps in outlines. null = use fontmake default (off). */
+    val removeOverlaps: Boolean? = null,
+    /** Flatten nested components. */
+    val flattenComponents: Boolean = false,
+    /** Apply autohinting. null = use fontmake default (typically enabled for static TTF). */
+    val autohint: Boolean? = null,
+    /** Extra fontmake CLI args for this output (advanced escape hatch). */
+    val extraArgs: List<String> = emptyList(),
+)
+
+/**
+ * Request a specific output format with its own options.
+ */
+data class OutputRequest(
+    val format: OutputFormat,
+    val outline: OutlineOptions = OutlineOptions(),
+)
+
+/**
+ * Top-level compilation options.
  */
 data class CompileOptions(
-    /** Output formats to generate (default: OTF + TTF) */
-    val formats: List<OutputFormat> = listOf(OutputFormat.OTF, OutputFormat.TTF),
-    /** Build static font instances (interpolated from masters) */
+    /** Requested outputs. Each output may carry its own options. */
+    val outputs: List<OutputRequest> = listOf(
+        OutputRequest(OutputFormat.OTF),
+        OutputRequest(OutputFormat.TTF),
+    ),
+    /** Build static font instances (interpolated from masters). */
     val interpolateInstances: Boolean = false,
-    /** Flatten nested components */
-    val flattenComponents: Boolean = false,
-    /** Specific output directory (optional, uses format-specific subdirs if null) */
+    /** Output directory (optional). If null, fontmake will use default subdirs under the working dir. */
     val outputDir: String? = null,
-    /** Specific output path (only valid for single output file) */
-    val outputPath: String? = null,
-    /** Additional command-line arguments */
-    val extraArgs: List<String> = emptyList(),
 )
 
 /**
@@ -127,9 +158,13 @@ sealed class CompilationResult {
  * val result = FontMake.compile(
  *     sourcePath = "/path/to/MyFont.glyphs",
  *     options = CompileOptions(
- *         formats = listOf(OutputFormat.OTF, OutputFormat.VARIABLE),
- *         interpolateInstances = true
- *     )
+ *         outputs = listOf(
+ *             OutputRequest(OutputFormat.OTF, OutlineOptions(removeOverlaps = true)),
+ *             OutputRequest(OutputFormat.WOFF2_OTF, OutlineOptions(removeOverlaps = true)),
+ *             OutputRequest(OutputFormat.VARIABLE),
+ *         ),
+ *         interpolateInstances = true,
+ *     ),
  * )
  *
  * when (result) {
@@ -169,30 +204,8 @@ object FontMake {
             )
         }
 
-        val args = buildCommandLine(sourcePath, options)
-        return executeCommand(args, sourceFile.parentFile, options)
-    }
-
-    /**
-     * Compile a font from a source file to a specific output directory.
-     *
-     * @param sourcePath Path to the font source file
-     * @param outputDir Directory to write compiled fonts
-     * @param formats Output formats to generate
-     * @return CompilationResult indicating success or failure
-     */
-    fun compile(
-        sourcePath: String,
-        outputDir: String,
-        vararg formats: OutputFormat,
-    ): CompilationResult {
-        return compile(
-            sourcePath = sourcePath,
-            options = CompileOptions(
-                formats = formats.toList().ifEmpty { listOf(OutputFormat.OTF, OutputFormat.TTF) },
-                outputDir = outputDir,
-            ),
-        )
+        val plan = planInvocations(options)
+        return executePlan(sourcePath, plan, sourceFile.parentFile)
     }
 
     /**
@@ -215,62 +228,152 @@ object FontMake {
         }
     }
 
-    private fun buildCommandLine(sourcePath: String, options: CompileOptions): List<String> {
-        // Separate native formats from web formats
-        val nativeFormats = options.formats.filter { it.isNative }
-        val webFormats = options.formats.filter { it.isWebFormat }
+    internal data class PlannedInvocation(
+        val formatsToBuild: List<OutputFormat>,
+        val requestedNativeFormats: Set<OutputFormat>,
+        val requestedWebFormats: List<OutputFormat>,
+        val interpolateInstances: Boolean,
+        val outputDir: String?,
+        val effectiveOutline: EffectiveOutlineOptions,
+    )
 
-        // Determine which base formats need to be built for web formats
-        val baseFormatsForWeb = webFormats.mapNotNull { it.baseFormat }.toSet()
+    internal data class EffectiveOutlineOptions(
+        val removeOverlaps: Boolean?,
+        val flattenComponents: Boolean,
+        val autohint: Boolean?,
+        val extraArgs: List<String>,
+    )
 
-        // Combine: native formats + any base formats needed for web that aren't already included
-        val formatsToBuild = (nativeFormats + baseFormatsForWeb.filter { base ->
-            nativeFormats.none { it == base }
-        }).distinct()
+    internal fun planInvocations(options: CompileOptions): List<PlannedInvocation> {
+        data class Need(
+            val baseFormat: OutputFormat,
+            val requestedFormat: OutputFormat,
+            val effectiveOutline: EffectiveOutlineOptions,
+        )
 
+        val needs = options.outputs.distinct().mapNotNull { request ->
+            val base = request.format.baseFormat ?: request.format
+            if (!base.isNative) return@mapNotNull null
+            Need(
+                baseFormat = base,
+                requestedFormat = request.format,
+                effectiveOutline = resolveEffectiveOutline(base, request.outline),
+            )
+        }
+
+        val grouped = needs.groupBy { need ->
+            Triple(
+                options.interpolateInstances,
+                options.outputDir,
+                need.effectiveOutline,
+            )
+        }
+
+        return grouped.entries.map { (key, groupNeeds) ->
+            val requestedWebFormats = groupNeeds
+                .map { it.requestedFormat }
+                .filter { it.isWebFormat }
+
+            val requestedNativeFormats = groupNeeds
+                .map { it.requestedFormat }
+                .filter { it.isNative }
+                .toSet()
+
+            PlannedInvocation(
+                formatsToBuild = groupNeeds.map { it.baseFormat }.distinct(),
+                requestedNativeFormats = requestedNativeFormats,
+                requestedWebFormats = requestedWebFormats,
+                interpolateInstances = key.first,
+                outputDir = key.second,
+                effectiveOutline = key.third,
+            )
+        }
+    }
+
+    private fun resolveEffectiveOutline(baseFormat: OutputFormat, outline: OutlineOptions): EffectiveOutlineOptions {
+        return EffectiveOutlineOptions(
+            removeOverlaps = outline.removeOverlaps,
+            flattenComponents = outline.flattenComponents,
+            autohint = outline.autohint,
+            extraArgs = outline.extraArgs,
+        )
+    }
+
+    private fun buildCommandLine(sourcePath: String, invocation: PlannedInvocation): List<String> {
         return buildList {
             add(binaryPath.toString())
-
-            // Source file
             add(sourcePath)
 
-            // Output formats (only native ones)
-            if (formatsToBuild.isNotEmpty()) {
+            if (invocation.formatsToBuild.isNotEmpty()) {
                 add("-o")
-                addAll(formatsToBuild.mapNotNull { it.flag })
+                addAll(invocation.formatsToBuild.mapNotNull { it.flag })
             }
 
-            // Output directory
-            options.outputDir?.let {
+            invocation.outputDir?.let {
                 add("--output-dir")
                 add(it)
             }
 
-            // Output path (single file)
-            options.outputPath?.let {
-                add("--output-path")
-                add(it)
-            }
-
-            // Interpolate instances
-            if (options.interpolateInstances) {
+            if (invocation.interpolateInstances) {
                 add("-i")
             }
 
-            // Flatten components
-            if (options.flattenComponents) {
+            if (invocation.effectiveOutline.flattenComponents) {
                 add("-f")
             }
 
-            // Extra arguments
-            addAll(options.extraArgs)
+            when (invocation.effectiveOutline.removeOverlaps) {
+                true -> { /* fontmake default is to remove overlaps, so no flag needed */ }
+                false -> add("--keep-overlaps")
+                null -> { /* use fontmake default */ }
+            }
+
+            when (invocation.effectiveOutline.autohint) {
+                true -> add("--autohint")
+                false -> add("--no-autohint")
+                null -> { /* use fontmake default */ }
+            }
+
+            addAll(invocation.effectiveOutline.extraArgs)
         }
     }
 
-    private fun executeCommand(
+    private fun executePlan(
+        sourcePath: String,
+        plan: List<PlannedInvocation>,
+        workingDir: File?,
+    ): CompilationResult {
+        val allFonts = mutableListOf<CompiledFont>()
+        val outputBuilder = StringBuilder()
+
+        for ((index, invocation) in plan.withIndex()) {
+            val args = buildCommandLine(sourcePath, invocation)
+            val result = executeInvocation(args, workingDir, invocation)
+            when (result) {
+                is CompilationResult.Success -> {
+                    allFonts.addAll(result.fonts)
+                    outputBuilder.appendLine("# Invocation ${index + 1}/${plan.size}")
+                    outputBuilder.appendLine(result.output)
+                }
+                is CompilationResult.Error -> {
+                    outputBuilder.appendLine("# Invocation ${index + 1}/${plan.size} FAILED")
+                    outputBuilder.appendLine(result.output)
+                    return CompilationResult.Error(
+                        message = result.message,
+                        exitCode = result.exitCode,
+                        output = outputBuilder.toString(),
+                    )
+                }
+            }
+        }
+
+        return CompilationResult.Success(fonts = allFonts, output = outputBuilder.toString())
+    }
+
+    private fun executeInvocation(
         args: List<String>,
         workingDir: File?,
-        options: CompileOptions,
+        invocation: PlannedInvocation,
     ): CompilationResult {
         return try {
             val processBuilder = ProcessBuilder(args)
@@ -278,49 +381,45 @@ object FontMake {
 
             workingDir?.let { processBuilder.directory(it) }
 
+            val baseDirForOutputs = invocation.outputDir?.let { File(it) } ?: workingDir
+            val preSnapshot = snapshotOutputs(baseDirForOutputs)
+
             val process = processBuilder.start()
             val output = process.inputStream.bufferedReader().readText()
             val exitCode = process.waitFor()
 
             if (exitCode == 0) {
-                val allBuiltFonts = findOutputFiles(workingDir, options)
                 val outputBuilder = StringBuilder(output)
+                val allBuiltFonts = findOutputFiles(workingDir, invocation.outputDir)
+                val newlyBuiltFonts = filterNewOutputs(allBuiltFonts, snapshotOutputs(baseDirForOutputs), preSnapshot)
 
-                // Determine which formats were requested
-                val requestedNativeFormats = options.formats.filter { it.isNative }.toSet()
-                val webFormats = options.formats.filter { it.isWebFormat }
-
-                // Determine which base formats were only built for web (not explicitly requested)
-                val baseFormatsOnlyForWeb = webFormats
-                    .mapNotNull { it.baseFormat }
-                    .filter { it !in requestedNativeFormats }
-                    .toSet()
-
-                // Compress to web formats
+                // Compress to requested web formats
                 val webFonts = mutableListOf<CompiledFont>()
-                for (webFormat in webFormats) {
+                for (webFormat in invocation.requestedWebFormats) {
                     val baseFormat = webFormat.baseFormat ?: continue
                     val compression = webFormat.compression ?: continue
                     val extension = when (baseFormat) {
                         OutputFormat.OTF -> "otf"
-                        OutputFormat.TTF -> "ttf"
+                        OutputFormat.TTF, OutputFormat.VARIABLE -> "ttf"
+                        OutputFormat.VARIABLE_CFF2 -> "otf"
                         else -> continue
                     }
 
-                    // Find matching base fonts
-                    val baseFonts = allBuiltFonts.filter { it.path.endsWith(".$extension") }
+                    val baseFonts = newlyBuiltFonts.filter { it.path.endsWith(".$extension") }
                     for (baseFont in baseFonts) {
                         val inputFile = File(baseFont.path)
                         val outputFile = File(
                             inputFile.parentFile,
-                            inputFile.nameWithoutExtension + "." + compression.extension
+                            inputFile.nameWithoutExtension + "." + compression.extension,
                         )
 
                         if (compress(baseFont.path, outputFile.absolutePath, compression)) {
-                            webFonts.add(CompiledFont(
-                                path = outputFile.absolutePath,
-                                name = outputFile.name,
-                            ))
+                            webFonts.add(
+                                CompiledFont(
+                                    path = outputFile.absolutePath,
+                                    name = outputFile.name,
+                                )
+                            )
                             outputBuilder.appendLine("Compressed: ${baseFont.name} -> ${outputFile.name}")
                         } else {
                             return CompilationResult.Error(
@@ -332,22 +431,20 @@ object FontMake {
                     }
                 }
 
-                // Filter out base fonts that were only built for web compression
-                val requestedFonts = if (baseFormatsOnlyForWeb.isNotEmpty()) {
-                    allBuiltFonts.filter { font ->
-                        val isOtf = font.path.endsWith(".otf")
-                        val isTtf = font.path.endsWith(".ttf")
-                        when {
-                            isOtf && OutputFormat.OTF in baseFormatsOnlyForWeb -> false
-                            isTtf && OutputFormat.TTF in baseFormatsOnlyForWeb -> false
-                            else -> true
-                        }
+                val requestedExtensions = invocation.requestedNativeFormats
+                    .flatMap { nativeExtensionsFor(it) }
+                    .toSet()
+
+                val requestedNativeFonts = if (requestedExtensions.isEmpty()) emptyList() else {
+                    newlyBuiltFonts.filter { font ->
+                        File(font.path).extension.lowercase() in requestedExtensions
                     }
-                } else {
-                    allBuiltFonts
                 }
 
-                CompilationResult.Success(fonts = requestedFonts + webFonts, output = outputBuilder.toString())
+                CompilationResult.Success(
+                    fonts = requestedNativeFonts + webFonts,
+                    output = outputBuilder.toString(),
+                )
             } else {
                 CompilationResult.Error(
                     message = "fontmake exited with code $exitCode",
@@ -361,6 +458,69 @@ object FontMake {
                 exitCode = -1,
                 output = "",
             )
+        }
+    }
+
+    private fun nativeExtensionsFor(format: OutputFormat): Set<String> {
+        return when (format) {
+            OutputFormat.OTF,
+            OutputFormat.OTF_CFF2,
+            OutputFormat.OTF_INTERPOLATABLE,
+            OutputFormat.VARIABLE_CFF2 -> setOf("otf")
+
+            OutputFormat.TTF,
+            OutputFormat.TTF_INTERPOLATABLE,
+            OutputFormat.VARIABLE -> setOf("ttf")
+
+            OutputFormat.UFO -> setOf("ufo", "ufoz")
+
+            // Derived formats are not produced directly by fontmake in our wrapper.
+            OutputFormat.WOFF_OTF,
+            OutputFormat.WOFF_TTF,
+            OutputFormat.WOFF2_OTF,
+            OutputFormat.WOFF2_TTF,
+            OutputFormat.WOFF_VARIABLE,
+            OutputFormat.WOFF2_VARIABLE,
+            OutputFormat.WOFF_VARIABLE_CFF2,
+            OutputFormat.WOFF2_VARIABLE_CFF2 -> emptySet()
+        }
+    }
+
+    private data class OutputSnapshotEntry(
+        val lastModified: Long,
+        val isDirectory: Boolean,
+    )
+
+    private fun snapshotOutputs(baseDir: File?): Map<String, OutputSnapshotEntry> {
+        if (baseDir == null || !baseDir.exists()) return emptyMap()
+
+        val allowedExtensions = setOf("otf", "ttf", "ufo", "ufoz", "woff", "woff2")
+        return baseDir
+            .walkTopDown()
+            .filter { it.exists() }
+            .filter { file ->
+                val ext = file.extension.lowercase()
+                ext in allowedExtensions && (file.isFile || (ext == "ufo" && file.isDirectory))
+            }
+            .associate { file ->
+                file.absolutePath to OutputSnapshotEntry(
+                    lastModified = file.lastModified(),
+                    isDirectory = file.isDirectory,
+                )
+            }
+    }
+
+    private fun filterNewOutputs(
+        outputs: List<CompiledFont>,
+        postSnapshot: Map<String, OutputSnapshotEntry>,
+        preSnapshot: Map<String, OutputSnapshotEntry>,
+    ): List<CompiledFont> {
+        return outputs.filter { font ->
+            val post = postSnapshot[font.path] ?: return@filter false
+            val pre = preSnapshot[font.path]
+
+            // New file/dir, or updated timestamp.
+            pre == null || post.lastModified > pre.lastModified
         }
     }
 
@@ -406,25 +566,18 @@ object FontMake {
         }
     }
 
-    private fun findOutputFiles(workingDir: File?, options: CompileOptions): List<CompiledFont> {
-        val baseDir = options.outputDir?.let { File(it) } ?: workingDir ?: return emptyList()
+    private fun findOutputFiles(workingDir: File?, outputDir: String?): List<CompiledFont> {
+        val baseDir = outputDir?.let { File(it) } ?: workingDir ?: return emptyList()
+        if (!baseDir.exists()) return emptyList()
 
-        // fontmake creates format-specific subdirectories by default
-        val outputDirs = if (options.outputDir != null) {
-            listOf(baseDir)
-        } else {
-            listOf(
-                "master_otf", "master_ttf", "master_otf_interpolatable", "master_ttf_interpolatable",
-                "instance_otf", "instance_ttf", "variable_ttf", "variable_otf", "master_ufo"
-            ).map { File(baseDir, it) }
-        }
+        val allowedExtensions = setOf("otf", "ttf", "ufo", "ufoz", "woff", "woff2")
 
-        return outputDirs
-            .filter { it.exists() && it.isDirectory }
-            .flatMap { dir ->
-                dir.listFiles { file ->
-                    file.isFile && (file.extension in listOf("otf", "ttf", "ufo", "ufoz"))
-                }?.toList() ?: emptyList()
+        return baseDir
+            .walkTopDown()
+            .filter { it.exists() }
+            .filter { file ->
+                val ext = file.extension.lowercase()
+                ext in allowedExtensions && (file.isFile || (ext == "ufo" && file.isDirectory))
             }
             .map { file ->
                 CompiledFont(
@@ -432,6 +585,7 @@ object FontMake {
                     name = file.name,
                 )
             }
+            .toList()
     }
 
     private fun extractNativeBinary(): Path {

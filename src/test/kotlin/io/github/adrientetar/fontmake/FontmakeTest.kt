@@ -8,7 +8,6 @@ package io.github.adrientetar.fontmake
 import com.google.common.truth.Truth.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.condition.EnabledIf
-import java.io.File
 
 class FontmakeTest {
 
@@ -41,17 +40,50 @@ class FontmakeTest {
     @Test
     fun `compile options builds correct command line`() {
         val options = CompileOptions(
-            formats = listOf(OutputFormat.OTF, OutputFormat.VARIABLE),
+            outputs = listOf(
+                OutputRequest(OutputFormat.OTF, OutlineOptions(removeOverlaps = true)),
+                OutputRequest(OutputFormat.VARIABLE, OutlineOptions(removeOverlaps = false)),
+            ),
             interpolateInstances = true,
-            flattenComponents = true,
             outputDir = "/tmp/output",
         )
 
         // Verify options are set correctly
-        assertThat(options.formats).containsExactly(OutputFormat.OTF, OutputFormat.VARIABLE)
+        assertThat(options.outputs.map { it.format }).containsExactly(OutputFormat.OTF, OutputFormat.VARIABLE)
         assertThat(options.interpolateInstances).isTrue()
-        assertThat(options.flattenComponents).isTrue()
         assertThat(options.outputDir).isEqualTo("/tmp/output")
+    }
+
+    @Test
+    fun `planner reuses base build when options match`() {
+        val options = CompileOptions(
+            outputs = listOf(
+                OutputRequest(OutputFormat.TTF, OutlineOptions(removeOverlaps = true)),
+                OutputRequest(OutputFormat.WOFF2_TTF, OutlineOptions(removeOverlaps = true)),
+            ),
+        )
+
+        val plan = FontMake.planInvocations(options)
+
+        assertThat(plan).hasSize(1)
+        assertThat(plan[0].formatsToBuild).containsExactly(OutputFormat.TTF)
+        assertThat(plan[0].requestedNativeFormats).containsExactly(OutputFormat.TTF)
+        assertThat(plan[0].requestedWebFormats).containsExactly(OutputFormat.WOFF2_TTF)
+    }
+
+    @Test
+    fun `planner splits builds when options differ`() {
+        val options = CompileOptions(
+            outputs = listOf(
+                OutputRequest(OutputFormat.TTF, OutlineOptions(extraArgs = listOf("--foo"))),
+                OutputRequest(OutputFormat.WOFF2_TTF, OutlineOptions(extraArgs = emptyList())),
+            ),
+        )
+
+        val plan = FontMake.planInvocations(options)
+
+        assertThat(plan).hasSize(2)
+        assertThat(plan.flatMap { it.formatsToBuild }).contains(OutputFormat.TTF)
     }
 
     @Test
