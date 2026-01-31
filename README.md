@@ -156,6 +156,32 @@ This library bundles pre-compiled fontmake binaries created using [Nuitka](https
 
 At runtime, the appropriate binary is extracted from JAR resources to a temp directory and executed via subprocess.
 
+## Development
+
+To build this library locally, you need:
+
+- JDK 21 or higher
+- [uv] in your `PATH` (used to create/manage the Python venv and install build deps)
+- A native build toolchain suitable for Nuitka on your OS (compiler/linker)
+- On Linux: `patchelf` (required by Nuitka for onefile/standalone builds)
+
+The build uses a few environment variables you can override:
+
+- `PYTHON_VERSION` (default: `3.11`)
+- `FONTMAKE_VERSION` (default: `3.11.1`)
+- `UV_PATH` (default: `uv`) if `uv` is not on your `PATH`
+
+```bash
+# Build the library (also builds the current-platform native fontmake binary)
+./gradlew build
+
+# Run Kotlin tests
+./gradlew test
+
+# Publish to Maven Local (~/.m2/repository)
+./gradlew publishToMavenLocal
+```
+
 ## Building Native Binaries
 
 The native binaries are built via GitHub Actions. To build locally:
@@ -175,12 +201,4 @@ python -m nuitka \
     -m fontmake
 ```
 
-## License
-
-Apache License 2.0
-
-## Related Projects
-
-- [fontmake](https://github.com/googlefonts/fontmake) - The original Python font compiler
-- [kotlin-fontc](https://github.com/AdrienTetar/kotlin-fontc) - Kotlin bindings for fontc (Rust-based, TTF only)
-- [Nuitka](https://nuitka.net/) - Python compiler used to create standalone binaries
+[uv](https://docs.astral.sh/uv/getting-started/installation/)

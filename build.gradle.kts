@@ -1,3 +1,5 @@
+import java.io.File
+
 plugins {
     alias(libs.plugins.kotlin.jvm)
     id("java-library")
@@ -15,7 +17,7 @@ repositories {
 }
 
 kotlin {
-    jvmToolchain(11)
+    jvmToolchain(21)
 }
 
 dependencies {
@@ -87,6 +89,9 @@ val fontmakeEntryPoint = file("src/main/python/fontmake_entry.py")
 tasks.register<Exec>("createVenv") {
     description = "Create Python virtual environment using uv"
     executable = uvPath.get()
+
+    val venvPythonFile = venvPython.map { File(it) }
+
     args(
         "venv",
         "--python", pythonVersion.get(),
@@ -94,8 +99,20 @@ tasks.register<Exec>("createVenv") {
         venvDir.get().asFile.absolutePath,
     )
     workingDir = projectDir
+
+    // Recreate the venv if it exists but is broken (e.g. missing python).
+    doFirst {
+        val venvRoot = venvDir.get().asFile
+        val pythonExe = venvPythonFile.get()
+        if (venvRoot.exists() && !pythonExe.exists()) {
+            venvRoot.deleteRecursively()
+        }
+    }
+
+    inputs.property("pythonVersion", pythonVersion.get())
+    inputs.property("uvExecutable", executable)
     outputs.dir(venvDir)
-    onlyIf { !venvDir.get().asFile.exists() }
+    outputs.file(venvPythonFile)
 }
 
 // Install dependencies with uv
