@@ -7,19 +7,20 @@ kotlin-fontmake
 
 [![Kotlin](https://img.shields.io/badge/Language-Kotlin-7f52ff.svg)](https://kotlinlang.org/)
 [![Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE.txt)
+[![Maven central](https://img.shields.io/maven-central/v/io.github.adrientetar/kotlin-fontmake?color=brightgreen)](https://central.sonatype.com/artifact/io.github.adrientetar/kotlin-fontmake)
 
 </div>
 
 [fontmake](https://github.com/googlefonts/fontmake) compiles fonts from various sources (`.glyphs`, `.ufo`, `.designspace`) into binaries (`.otf`, `.ttf`). It supports static instances and variable fonts with both TrueType and CFF/CFF2 outlines.
 
-This library provides a Kotlin wrapper for fontmake using standalone binaries built with the [Nuitka](https://nuitka.net/) Python-to-native compiler. No Python installation is required.
+This library provides a Kotlin wrapper for fontmake using standalone binaries built with the [Nuitka] Python-to-native compiler. No Python installation is required.
 
 ## Features
 
 - **Full fontmake capabilities**: OTF, TTF, variable fonts, CFF2
 - **Web font compression**: WOFF and WOFF2 output (Brotli)
 - **Self-contained**: No Python runtime needed
-- **Cross-platform**: macOS (ARM64/x64), Linux (x64), Windows (x64)
+- **Cross-platform**: macOS (ARM64/x64), Linux (ARM64/x64), Windows (ARM64/x64)
 - **Simple API**: Kotlin-idiomatic interface
 
 ## Maven Library
@@ -147,7 +148,7 @@ When you request a web format, the library automatically builds the required bas
 
 ## How It Works
 
-This library bundles pre-compiled fontmake binaries created using [Nuitka](https://nuitka.net/), a Python-to-native compiler. The binary includes:
+This library bundles pre-compiled fontmake binaries created using [Nuitka], a Python-to-native compiler. The binary includes:
 
 - Python interpreter (embedded)
 - fontmake and all dependencies (fonttools, ufo2ft, glyphsLib, etc.)
@@ -160,7 +161,7 @@ At runtime, the appropriate binary is extracted from JAR resources to a temp dir
 
 To build this library locally, you need:
 
-- JDK 21 or higher
+- JDK 11 or higher
 - [uv] in your `PATH` (used to create/manage the Python venv and install build deps)
 - A native build toolchain suitable for Nuitka on your OS (compiler/linker)
 - On Linux: `patchelf` (required by Nuitka for onefile/standalone builds)
@@ -169,6 +170,7 @@ The build uses a few environment variables you can override:
 
 - `PYTHON_VERSION` (default: `3.11`)
 - `FONTMAKE_VERSION` (default: `3.11.1`)
+- `NUITKA_VERSION` (default: `4.0.1`)
 - `UV_PATH` (default: `uv`) if `uv` is not on your `PATH`
 
 ```bash
@@ -201,4 +203,5 @@ python -m nuitka \
     -m fontmake
 ```
 
-[uv](https://docs.astral.sh/uv/getting-started/installation/)
+[Nuitka]: https://github.com/Nuitka/Nuitka
+[uv]: https://docs.astral.sh/uv/getting-started/installation/
