@@ -20,7 +20,7 @@ This library provides a Kotlin wrapper for fontmake using standalone binaries bu
 - **Full fontmake capabilities**: OTF, TTF, variable fonts, CFF2
 - **Web font compression**: WOFF and WOFF2 output (Brotli)
 - **Self-contained**: No Python runtime needed
-- **Cross-platform**: macOS (ARM64/x64), Linux (ARM64/x64), Windows (ARM64/x64)
+- **Cross-platform**: macOS (ARM64/x64), Linux (ARM64/x64), Windows (x64)
 - **Simple API**: Kotlin-idiomatic interface
 
 ## Maven Library
@@ -200,7 +200,7 @@ python -m nuitka \
     --include-package=fontTools \
     --include-package=ufo2ft \
     --output-filename=fontmake \
-    -m fontmake
+    src/main/python/fontmake_entry.py
 ```
 
 [Nuitka]: https://github.com/Nuitka/Nuitka

@@ -8,6 +8,7 @@ on:
 env:
   FONTMAKE_VERSION: '3.11.1'
   NUITKA_VERSION: '4.0.1'
+  PYTHON_VERSION: '3.11'
 
 jobs:
   build-native:
@@ -28,9 +29,6 @@ jobs:
             binary-name: fontmake
           - os: windows-latest
             classifier: windows-x64
-            binary-name: fontmake.exe
-          - os: windows-11-arm
-            classifier: windows-arm64
             binary-name: fontmake.exe
 
     runs-on: ${{ matrix.os }}
@@ -54,8 +52,8 @@ jobs:
 
       - name: Create venv and install dependencies
         run: |
-          uv venv
-          uv pip install nuitka==${{ env.NUITKA_VERSION }} fontmake==${{ env.FONTMAKE_VERSION }}
+          uv venv --python ${{ env.PYTHON_VERSION }}
+          uv pip install setuptools nuitka==${{ env.NUITKA_VERSION }} fontmake==${{ env.FONTMAKE_VERSION }} cu2qu defcon mutatorMath fs brotli
 
       - name: Build fontmake with Nuitka
         shell: bash
@@ -63,40 +61,35 @@ jobs:
           source .venv/bin/activate || source .venv/Scripts/activate
           python -m nuitka \
             --mode=standalone \
-            --follow-imports \
             --include-package=fontmake \
-            --include-package=fontTools \
-            --include-package=ufo2ft \
-            --include-package=glyphsLib \
-            --include-package=fontMath \
-            --include-package=booleanOperations \
-            --include-package=cu2qu \
-            --include-package=cffsubr \
-            --include-package=ufoLib2 \
-            --include-package=defcon \
-            --include-package=mutatorMath \
-            --include-package=designspaceLib \
-            --include-package=fs \
-            --include-package=lxml \
-            --include-package=unicodedata2 \
+            --include-package=openstep_plist \
+            --include-package=glyphsLib.filters \
+            --include-package-data=glyphsLib \
+            --include-package-data=cffsubr \
+            --noinclude-setuptools-mode=nofollow \
+            --noinclude-pytest-mode=nofollow \
+            --noinclude-unittest-mode=nofollow \
+            --noinclude-pydoc-mode=nofollow \
+            --noinclude-IPython-mode=nofollow \
+            --nofollow-import-to=doctest \
             --output-filename=${{ matrix.binary-name }} \
             --output-dir=build/nuitka \
             --remove-output \
             --assume-yes-for-downloads \
-            -m fontmake
+            src/main/python/fontmake_entry.py
 
       - name: Package binary (Unix)
         if: runner.os != 'Windows'
         run: |
           mkdir -p build/native/${{ matrix.classifier }}
-          cp build/nuitka/fontmake.dist/${{ matrix.binary-name }} build/native/${{ matrix.classifier }}/
+          cp build/nuitka/fontmake_entry.dist/${{ matrix.binary-name }} build/native/${{ matrix.classifier }}/
 
       - name: Package binary (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path build/native/${{ matrix.classifier }}
-          Copy-Item build/nuitka/fontmake.dist/${{ matrix.binary-name }} build/native/${{ matrix.classifier }}/
+          Copy-Item build/nuitka/fontmake_entry.dist/${{ matrix.binary-name }} build/native/${{ matrix.classifier }}/
 
       - name: Test binary
         shell: bash
@@ -145,7 +138,7 @@ jobs:
       - name: Build JARs
         run: |
           # Skip Nuitka build tasks since we have pre-built binaries
-          ./gradlew jar sourcesJar javadocJar -Prelease \
+          ./gradlew jar sourcesJar plainJavadocJar -Prelease \
             -x installNuitkaDependencies \
             -x buildFontmakeBinary \
             -x copyNativeBinary

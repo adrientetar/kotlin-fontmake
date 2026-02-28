@@ -171,7 +171,7 @@ tasks.register<Exec>("buildFontmakeBinary") {
         "--noinclude-pydoc-mode=nofollow",
         "--noinclude-IPython-mode=nofollow",
         // Some libraries import doctest helpers; not needed for deployments.
-        "--noinclude-custom-mode=doctest:nofollow",
+        "--nofollow-import-to=doctest",
         "--output-filename=${nativeBinaryName.get()}",
         "--output-dir=${outputDir.absolutePath}",
         "--remove-output",
@@ -252,7 +252,6 @@ val allNativeClassifiers = listOf(
     "linux-x64",
     "linux-arm64",
     "windows-x64",
-    "windows-arm64",
 )
 
 val nativeJarsByClassifier: Map<String, TaskProvider<Jar>> =
