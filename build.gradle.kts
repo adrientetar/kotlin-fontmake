@@ -64,6 +64,8 @@ val nativeBinDir = layout.buildDirectory.dir(platformClassifier.map { "native/$i
 
 // fontmake version to build
 val fontmakeVersion = providers.environmentVariable("FONTMAKE_VERSION").orElse("3.11.1")
+// Nuitka version to build with
+val nuitkaVersion = providers.environmentVariable("NUITKA_VERSION").orElse("4.0.1")
 
 // uv package manager - resolve from PATH (optionally override via UV_PATH)
 val uvPath = providers.environmentVariable("UV_PATH").orElse("uv")
@@ -128,7 +130,7 @@ tasks.register<Exec>("installNuitkaDependencies") {
         "--quiet",
         "--python",
         venvPython.get(),
-        "nuitka",
+        "nuitka==${nuitkaVersion.get()}",
         "fontmake==${fontmakeVersion.get()}",
         // These are commonly imported by fontmake's dependency stack but are not
         // declared directly on the fontmake distribution.

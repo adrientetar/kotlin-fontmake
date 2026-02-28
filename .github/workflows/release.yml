@@ -7,6 +7,7 @@ on:
 
 env:
   FONTMAKE_VERSION: '3.11.1'
+  NUITKA_VERSION: '4.0.1'
 
 jobs:
   build-native:
@@ -54,7 +55,7 @@ jobs:
       - name: Create venv and install dependencies
         run: |
           uv venv
-          uv pip install nuitka fontmake==${{ env.FONTMAKE_VERSION }}
+          uv pip install nuitka==${{ env.NUITKA_VERSION }} fontmake==${{ env.FONTMAKE_VERSION }}
 
       - name: Build fontmake with Nuitka
         shell: bash
