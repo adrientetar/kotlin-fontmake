@@ -164,31 +164,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts/
-
-      - name: Rename binaries with platform classifier
-        run: |
-          mkdir -p release-assets
-          for dir in artifacts/native-*; do
-            classifier=$(basename "$dir" | sed 's/native-//')
-            for file in "$dir"/*; do
-              filename=$(basename "$file")
-              if [[ "$filename" == *.exe ]]; then
-                name="${filename%.exe}"
-                cp "$file" "release-assets/${name}-${classifier}.exe"
-              else
-                cp "$file" "release-assets/${filename}-${classifier}"
-              fi
-            done
-          done
-          ls -la release-assets/
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           generate_release_notes: true
-          files: |
-            release-assets/*
